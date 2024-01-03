@@ -1,0 +1,6 @@
+# Python cche files
+**/__pycache__
+**/.ipynb_checkpoints
+
+# weight files
+**/*.pth
