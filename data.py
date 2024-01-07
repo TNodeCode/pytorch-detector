@@ -5,8 +5,8 @@ from torchvision.datasets import CocoDetection
 def build_coco_dataset(root: str, annFile: str, transform):
     return CocoDetection(root=root, annFile=annFile, transform=transform)
 
-def build_dataloader(dataset, batch_size: int, collate_fn=None):
-    return torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
+def build_dataloader(dataset, batch_size: int, collate_fn=None, shuffle=True, drop_last=False):
+    return torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, drop_last=drop_last, collate_fn=collate_fn)
 
 def collate_fn_coco(data):
     return data

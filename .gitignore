@@ -2,5 +2,9 @@
 **/__pycache__
 **/.ipynb_checkpoints
 
+# log files
+logs/**
+!logs/.gitignore
+
 # weight files
 **/*.pth

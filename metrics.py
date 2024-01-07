@@ -22,8 +22,15 @@ def compute_precision_recall(true_boxes, true_labels, pred_boxes, pred_labels, i
 
     false_negatives = len(true_boxes) - true_positives
 
-    precision = true_positives / (true_positives + false_positives)
-    recall = true_positives / (true_positives + false_negatives)
+    if true_positives + false_positives != 0:
+        precision = true_positives / (true_positives + false_positives)
+    else:
+        precision = 0
+        
+    if true_positives + false_negatives != 0:
+        recall = true_positives / (true_positives + false_negatives)
+    else:
+        recall = 0
 
     return precision, recall
 
