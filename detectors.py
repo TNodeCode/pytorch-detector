@@ -7,7 +7,8 @@ from metrics import *
 from datetime import datetime
 import logger
 import inference
-from feature_extractors import DINOv2ViTBackbone, DINOv2ConvNextBackbone
+from feature_extractors import DINOv2ViT, DINOv2ViTBackbone, DINOv2ConvNextBackbone
+from hungarian_head import HungarianDetectionHead, DINOv2HungarianDetectionModel
 
 
 class AbstractDetector():
@@ -692,4 +693,102 @@ class DINOv2ConvNextRetinaNetDetector(AbstractDetector):
             in_channels=in_channels,
             num_anchors=num_anchors,
             num_classes=num_classes + 1,
+        )
+
+
+class DINOv2HungarianDetector(AbstractDetector):
+    """DINOv2 detector with a DETR-style Hungarian-matching detection head.
+
+    Combines a frozen (or optionally fine-tuned) :class:`DINOv2ViT` backbone
+    with a :class:`~hungarian_head.HungarianDetectionHead` that uses the
+    Hungarian algorithm to assign predicted queries to ground-truth objects
+    during training.
+
+    The model is trained end-to-end with a set-based loss consisting of three
+    terms: cross-entropy classification loss, L1 bounding-box regression loss,
+    and GIoU bounding-box regression loss.
+
+    Args:
+        num_classes (int | None): Number of foreground object classes.
+        resume (str | None): Path to a checkpoint file to load weights from.
+        device (str): ``'cpu'`` or a CUDA device string (e.g. ``'cuda:0'``).
+        root_dir (str | None): Root directory for logging.
+        finetuning (bool): If ``True`` the DINOv2 backbone weights are updated
+            during training.  Defaults to ``False`` (backbone frozen).
+        model_name (str | None): HuggingFace model identifier for pretrained
+            DINOv2 weights (e.g. ``'facebook/dinov2-base'``).  When ``None``
+            the backbone is randomly initialised.
+        hidden_dim (int): Transformer / embedding dimensionality.  Default: 256.
+        num_queries (int): Number of learnable object queries.  Default: 100.
+        nhead (int): Number of attention heads per transformer decoder layer.
+            Default: 8.
+        num_decoder_layers (int): Depth of the transformer decoder.
+            Default: 6.
+        score_threshold (float): Minimum foreground score to keep during
+            inference.  Default: 0.5.
+    """
+
+    def __init__(
+        self,
+        num_classes: int = None,
+        resume: str = None,
+        device: str = "cpu",
+        root_dir: str = None,
+        finetuning: bool = False,
+        model_name: str = None,
+        hidden_dim: int = 256,
+        num_queries: int = 100,
+        nhead: int = 8,
+        num_decoder_layers: int = 6,
+        score_threshold: float = 0.5,
+    ):
+        # Set attributes before calling super().__init__ because
+        # AbstractDetector.__init__ immediately calls build_model → load_pretrained_model.
+        self.finetuning = finetuning
+        self.model_name = model_name
+        self.hidden_dim = hidden_dim
+        self.num_queries = num_queries
+        self.nhead = nhead
+        self.num_decoder_layers = num_decoder_layers
+        self.score_threshold = score_threshold
+        super().__init__(
+            name="dinov2_hungarian",
+            num_classes=num_classes,
+            resume=resume,
+            device=device,
+            root_dir=root_dir,
+        )
+
+    def get_loss_names(self) -> list[str]:
+        return ["loss_classification", "loss_bbox", "loss_giou"]
+
+    def load_pretrained_model(self):
+        backbone = DINOv2ViT(
+            model_name=self.model_name,
+            finetuning=self.finetuning,
+            layers=[],
+            layer_norm=False,
+        )
+        in_channels = backbone.config.hidden_size
+        head = HungarianDetectionHead(
+            in_channels=in_channels,
+            num_classes=91,  # COCO default; replaced by replace_head when num_classes is set
+            hidden_dim=self.hidden_dim,
+            num_queries=self.num_queries,
+            nhead=self.nhead,
+            num_decoder_layers=self.num_decoder_layers,
+            score_threshold=self.score_threshold,
+        )
+        return DINOv2HungarianDetectionModel(backbone=backbone, head=head)
+
+    def replace_head(self, model, num_classes: int):
+        in_channels = model.backbone.config.hidden_size
+        model.head = HungarianDetectionHead(
+            in_channels=in_channels,
+            num_classes=num_classes,
+            hidden_dim=self.hidden_dim,
+            num_queries=self.num_queries,
+            nhead=self.nhead,
+            num_decoder_layers=self.num_decoder_layers,
+            score_threshold=self.score_threshold,
         )
