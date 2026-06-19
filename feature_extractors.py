@@ -13,6 +13,10 @@ class DINOv2ViT(nn.Module):
     from (B, N, D) to spatial feature maps (B, D, H, W).
 
     Args:
+        model_name (str | None): HuggingFace model identifier to load
+            pretrained weights (e.g. ``'facebook/dinov2-base'``).  When
+            ``None`` a randomly-initialised model using the default
+            :class:`~transformers.Dinov2Config` is created.
         finetuning (bool): If True the backbone weights are trainable.
         output_patches (bool): If True include the raw patch embeddings as an
             additional output level.
@@ -24,6 +28,7 @@ class DINOv2ViT(nn.Module):
 
     def __init__(
         self,
+        model_name: str = None,
         finetuning: bool = False,
         output_patches: bool = False,
         layers: list = None,
@@ -35,8 +40,14 @@ class DINOv2ViT(nn.Module):
         self.finetuning = finetuning
         self.layers = layers
         self.output_patches = output_patches
-        self.config = Dinov2Config()
-        self.model = Dinov2Model(self.config)
+
+        if model_name is not None:
+            self.model = Dinov2Model.from_pretrained(model_name)
+            self.config = self.model.config
+        else:
+            self.config = Dinov2Config()
+            self.model = Dinov2Model(self.config)
+
         self.layer_norm = layer_norm and (len(layers) + int(output_patches)) > 0
         if self.layer_norm:
             self.norms = nn.ModuleList([
@@ -65,12 +76,14 @@ class DINOv2ViT(nn.Module):
         hooks = []
 
         if self.output_patches:
+            # key= default-argument captures current string at definition time
             hooks.append(
                 self.model.embeddings.register_forward_hook(
                     lambda m, i, o, key="embeddings": captured.update({key: o})
                 )
             )
         for layer_idx in self.layers:
+            # key=layer_idx default-argument captures the current int at definition time
             hooks.append(
                 self.model.encoder.layer[layer_idx].register_forward_hook(
                     lambda m, i, o, key=layer_idx: captured.update({key: o})
@@ -109,6 +122,10 @@ class DINOv2ConvNext(nn.Module):
     this extractor naturally suitable for FPN-based detectors.
 
     Args:
+        model_name (str | None): HuggingFace model identifier to load
+            pretrained weights (e.g. ``'facebook/convnext-base-224'``).  When
+            ``None`` a randomly-initialised model using the default
+            :class:`~transformers.ConvNextConfig` is created.
         finetuning (bool): If True the backbone weights are trainable.
         layers (list[int]): Indices of ConvNext stages to capture.
             Default: [0, 1, 2, 3].
@@ -116,6 +133,7 @@ class DINOv2ConvNext(nn.Module):
 
     def __init__(
         self,
+        model_name: str = None,
         finetuning: bool = False,
         layers: list = None,
     ):
@@ -124,8 +142,14 @@ class DINOv2ConvNext(nn.Module):
             layers = [0, 1, 2, 3]
         self.finetuning = finetuning
         self.layers = layers
-        self.config = ConvNextConfig()
-        self.model = ConvNextModel(self.config)
+
+        if model_name is not None:
+            self.model = ConvNextModel.from_pretrained(model_name)
+            self.config = self.model.config
+        else:
+            self.config = ConvNextConfig()
+            self.model = ConvNextModel(self.config)
+
         if not self.finetuning:
             self._freeze()
 
@@ -148,6 +172,7 @@ class DINOv2ConvNext(nn.Module):
         hooks = []
 
         for i in self.layers:
+            # key=i default-argument captures the current int at definition time
             hooks.append(
                 self.model.encoder.stages[i].register_forward_hook(
                     lambda m, inp, out, key=i: captured.update({key: out})
@@ -179,13 +204,21 @@ class DINOv2ViTBackbone(nn.Module):
     to produce five scales.
 
     Args:
+        model_name (str | None): Passed to :class:`DINOv2ViT`.  Provide a
+            HuggingFace identifier (e.g. ``'facebook/dinov2-base'``) to load
+            pretrained weights.
         out_channels (int): Number of channels in every output feature level.
         finetuning (bool): Passed to :class:`DINOv2ViT`.
     """
 
-    def __init__(self, out_channels: int = 256, finetuning: bool = False):
+    def __init__(
+        self,
+        model_name: str = None,
+        out_channels: int = 256,
+        finetuning: bool = False,
+    ):
         super().__init__()
-        self.body = DINOv2ViT(finetuning=finetuning, layers=[], layer_norm=False)
+        self.body = DINOv2ViT(model_name=model_name, finetuning=finetuning, layers=[], layer_norm=False)
         hidden = self.body.config.hidden_size
 
         self.proj = nn.Conv2d(hidden, out_channels, kernel_size=1)
@@ -208,18 +241,27 @@ class DINOv2ViTBackbone(nn.Module):
 class DINOv2ConvNextBackbone(nn.Module):
     """ConvNext backbone with FPN for detection.
 
-    Wraps :class:`DINOv2ConvNext` and applies a
-    :class:`~torchvision.ops.FeaturePyramidNetwork` across all four ConvNext
-    stages to produce a uniform ``out_channels``-wide feature pyramid.
+    Wraps :class:`DINOv2ConvNext` (all four stages) and applies a
+    :class:`~torchvision.ops.FeaturePyramidNetwork` to produce a uniform
+    ``out_channels``-wide five-level feature pyramid (four FPN levels plus one
+    max-pool level).
 
     Args:
+        model_name (str | None): Passed to :class:`DINOv2ConvNext`.  Provide a
+            HuggingFace identifier (e.g. ``'facebook/convnext-base-224'``) to
+            load pretrained weights.
         out_channels (int): Number of channels in every FPN output level.
         finetuning (bool): Passed to :class:`DINOv2ConvNext`.
     """
 
-    def __init__(self, out_channels: int = 256, finetuning: bool = False):
+    def __init__(
+        self,
+        model_name: str = None,
+        out_channels: int = 256,
+        finetuning: bool = False,
+    ):
         super().__init__()
-        self.body = DINOv2ConvNext(finetuning=finetuning, layers=[0, 1, 2, 3])
+        self.body = DINOv2ConvNext(model_name=model_name, finetuning=finetuning, layers=[0, 1, 2, 3])
         in_channels_list = list(self.body.config.hidden_sizes)
         self.fpn = FeaturePyramidNetwork(
             in_channels_list=in_channels_list,
@@ -230,7 +272,11 @@ class DINOv2ConvNextBackbone(nn.Module):
 
     def forward(self, x: torch.Tensor) -> OrderedDict:
         stage_feats = self.body(x)
+        # Map each feature to its actual stage index so the FPN in_channels
+        # list aligns correctly with the captured feature maps.
         feat_dict = OrderedDict(
-            (str(i), f) for i, f in enumerate(stage_feats)
+            (str(stage_idx), f)
+            for stage_idx, f in zip(self.body.layers, stage_feats)
         )
         return self.fpn(feat_dict)
+

@@ -574,7 +574,7 @@ class DINOv2ViTRetinaNetDetector(AbstractDetector):
     """RetinaNet detector with a DINOv2 ViT feature extractor backbone.
 
     The DINOv2 ViT last-layer features are projected and downsampled into a
-    four-level feature pyramid, which is consumed by a RetinaNet head.
+    five-level feature pyramid, which is consumed by a RetinaNet head.
 
     Args:
         num_classes (int | None): Number of foreground classes.  When
@@ -584,6 +584,9 @@ class DINOv2ViTRetinaNetDetector(AbstractDetector):
         root_dir (str | None): Root directory used for logging.
         finetuning (bool): If ``True`` the DINOv2 backbone weights are
             updated during training.  Defaults to ``False`` (frozen).
+        model_name (str | None): HuggingFace model identifier for pretrained
+            DINOv2 weights (e.g. ``'facebook/dinov2-base'``).  When ``None``
+            the backbone is randomly initialised.
     """
 
     def __init__(
@@ -593,8 +596,10 @@ class DINOv2ViTRetinaNetDetector(AbstractDetector):
         device: str = "cpu",
         root_dir: str = None,
         finetuning: bool = False,
+        model_name: str = None,
     ):
         self.finetuning = finetuning
+        self.model_name = model_name
         super().__init__(
             name="dinov2_vit_retinanet",
             num_classes=num_classes,
@@ -607,7 +612,11 @@ class DINOv2ViTRetinaNetDetector(AbstractDetector):
         return ["classification", "bbox_regression"]
 
     def load_pretrained_model(self):
-        backbone = DINOv2ViTBackbone(out_channels=256, finetuning=self.finetuning)
+        backbone = DINOv2ViTBackbone(
+            model_name=self.model_name,
+            out_channels=256,
+            finetuning=self.finetuning,
+        )
         return torchvision.models.detection.RetinaNet(
             backbone=backbone,
             num_classes=91,
@@ -627,7 +636,8 @@ class DINOv2ConvNextRetinaNetDetector(AbstractDetector):
     """RetinaNet detector with a ConvNext feature extractor backbone.
 
     All four ConvNext stages are passed through an FPN to produce a
-    five-level (4 + max-pool) feature pyramid that feeds the RetinaNet head.
+    five-level (4 FPN + max-pool) feature pyramid that feeds the RetinaNet
+    head.
 
     Args:
         num_classes (int | None): Number of foreground classes.  When
@@ -637,6 +647,9 @@ class DINOv2ConvNextRetinaNetDetector(AbstractDetector):
         root_dir (str | None): Root directory used for logging.
         finetuning (bool): If ``True`` the ConvNext backbone weights are
             updated during training.  Defaults to ``False`` (frozen).
+        model_name (str | None): HuggingFace model identifier for pretrained
+            ConvNext weights (e.g. ``'facebook/convnext-base-224'``).  When
+            ``None`` the backbone is randomly initialised.
     """
 
     def __init__(
@@ -646,8 +659,10 @@ class DINOv2ConvNextRetinaNetDetector(AbstractDetector):
         device: str = "cpu",
         root_dir: str = None,
         finetuning: bool = False,
+        model_name: str = None,
     ):
         self.finetuning = finetuning
+        self.model_name = model_name
         super().__init__(
             name="dinov2_convnext_retinanet",
             num_classes=num_classes,
@@ -660,7 +675,11 @@ class DINOv2ConvNextRetinaNetDetector(AbstractDetector):
         return ["classification", "bbox_regression"]
 
     def load_pretrained_model(self):
-        backbone = DINOv2ConvNextBackbone(out_channels=256, finetuning=self.finetuning)
+        backbone = DINOv2ConvNextBackbone(
+            model_name=self.model_name,
+            out_channels=256,
+            finetuning=self.finetuning,
+        )
         return torchvision.models.detection.RetinaNet(
             backbone=backbone,
             num_classes=91,
