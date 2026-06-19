@@ -1,6 +1,6 @@
 # Training a detector
 
-All detector wrappers live in `/home/runner/work/pytorch-detector/pytorch-detector/detectors.py`. They expose the same high-level `train(...)` entry point through `AbstractDetector`.
+All detector wrappers live in `detectors.py`. They expose the same high-level `train(...)` entry point through `AbstractDetector`.
 
 ## 1. Pick a detector class
 

@@ -6,4 +6,4 @@ This directory collects the project-specific usage notes that are only briefly c
 - [Training a detector](training.md) shows how the detector wrappers are instantiated and how `AbstractDetector.train(...)` uses the dataset inputs, logs, checkpoints, and validation split.
 - [Inference with a detector](inference.md) explains what `detector.inference()` returns and how batched prediction and visualization work.
 
-The documentation in this folder reflects the current code in `/home/runner/work/pytorch-detector/pytorch-detector/data.py`, `/home/runner/work/pytorch-detector/pytorch-detector/detectors.py`, and `/home/runner/work/pytorch-detector/pytorch-detector/inference.py`.
+The documentation in this folder reflects the current code in `data.py`, `detectors.py`, and `inference.py`.

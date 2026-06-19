@@ -7,7 +7,7 @@ detector = FasterRCNNV2Detector(num_classes=num_classes, resume=checkpoint, devi
 inference = detector.inference()
 ```
 
-`detector.inference()` returns an `Inference` object from `/home/runner/work/pytorch-detector/pytorch-detector/inference.py`.
+`detector.inference()` returns an `Inference` object from `inference.py`.
 
 ## Default behavior
 
