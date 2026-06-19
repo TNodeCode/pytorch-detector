@@ -362,8 +362,8 @@ class HungarianDetectionHead(nn.Module):
 
         Returns:
             dict | list[dict]:
-                * **Training** – a dict with keys ``'loss_classification'``,
-                  ``'loss_bbox'``, and ``'loss_giou'``.
+                * **Training** – a dict with keys ``'classification'``,
+                  ``'bbox'``, and ``'giou'``.
                 * **Inference** – a list of dicts each containing ``'boxes'``
                   (absolute *xyxy*), ``'labels'`` (1-indexed), and ``'scores'``.
         """
@@ -407,8 +407,8 @@ class HungarianDetectionHead(nn.Module):
             targets: list of ground-truth dicts (see :meth:`forward`).
 
         Returns:
-            dict with keys ``'loss_classification'``, ``'loss_bbox'``,
-            ``'loss_giou'``.
+            dict with keys ``'classification'``, ``'bbox'``,
+            ``'giou'``.
         """
         B, Q, _ = pred_logits.shape
         device = pred_logits.device
@@ -470,9 +470,9 @@ class HungarianDetectionHead(nn.Module):
             loss_giou = pred_boxes.sum() * 0.0
 
         return {
-            "loss_classification": self.loss_weight_class * loss_cls,
-            "loss_bbox": self.loss_weight_bbox * loss_bbox,
-            "loss_giou": self.loss_weight_giou * loss_giou,
+            "classification": self.loss_weight_class * loss_cls,
+            "bbox": self.loss_weight_bbox * loss_bbox,
+            "giou": self.loss_weight_giou * loss_giou,
         }
 
     # ------------------------------------------------------------------

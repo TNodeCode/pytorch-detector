@@ -760,7 +760,7 @@ class DINOv2HungarianDetector(AbstractDetector):
         )
 
     def get_loss_names(self) -> list[str]:
-        return ["loss_classification", "loss_bbox", "loss_giou"]
+        return ["classification", "bbox", "giou"]
 
     def load_pretrained_model(self):
         backbone = DINOv2ViT(
