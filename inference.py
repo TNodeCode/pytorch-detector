@@ -12,7 +12,8 @@ class Inference():
         self.detector = detector
         self.batch_size = batch_size
         self.transforms = v2.Compose([
-            v2.ToTensor(),
+            v2.ToImage(),
+            v2.ToDtype(torch.float32, scale=True),
         ])
         
     def get_number_of_batches(self, n_images: int):

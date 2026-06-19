@@ -479,7 +479,7 @@ class FCOSResNet50FPNDetector(AbstractDetector):
     
     def load_pretrained_model(self):
         return torchvision.models.detection.fcos_resnet50_fpn(
-            weights=torchvision.models.detection.FCOS_ResNet50_FPN_Weights
+            weights=torchvision.models.detection.FCOS_ResNet50_FPN_Weights.DEFAULT
         )
         
     def replace_head(self, model, num_classes: int):
