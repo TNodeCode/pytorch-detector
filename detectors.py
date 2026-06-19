@@ -7,6 +7,7 @@ from metrics import *
 from datetime import datetime
 import logger
 import inference
+from feature_extractors import DINOv2ViTBackbone, DINOv2ConvNextBackbone
 
 
 class AbstractDetector():
@@ -566,4 +567,110 @@ class SSDLite320MobileNetV3LargeDetector(AbstractDetector):
             in_channels=in_channels,
             num_anchors=num_anchors,
             num_classes=num_classes+1,
+        )
+
+
+class DINOv2ViTRetinaNetDetector(AbstractDetector):
+    """RetinaNet detector with a DINOv2 ViT feature extractor backbone.
+
+    The DINOv2 ViT last-layer features are projected and downsampled into a
+    four-level feature pyramid, which is consumed by a RetinaNet head.
+
+    Args:
+        num_classes (int | None): Number of foreground classes.  When
+            provided the detection head is replaced to match.
+        resume (str | None): Path to a checkpoint to resume from.
+        device (str): ``"cpu"`` or a CUDA device string.
+        root_dir (str | None): Root directory used for logging.
+        finetuning (bool): If ``True`` the DINOv2 backbone weights are
+            updated during training.  Defaults to ``False`` (frozen).
+    """
+
+    def __init__(
+        self,
+        num_classes: int = None,
+        resume: str = None,
+        device: str = "cpu",
+        root_dir: str = None,
+        finetuning: bool = False,
+    ):
+        self.finetuning = finetuning
+        super().__init__(
+            name="dinov2_vit_retinanet",
+            num_classes=num_classes,
+            resume=resume,
+            device=device,
+            root_dir=root_dir,
+        )
+
+    def get_loss_names(self) -> list[str]:
+        return ["classification", "bbox_regression"]
+
+    def load_pretrained_model(self):
+        backbone = DINOv2ViTBackbone(out_channels=256, finetuning=self.finetuning)
+        return torchvision.models.detection.RetinaNet(
+            backbone=backbone,
+            num_classes=91,
+        )
+
+    def replace_head(self, model, num_classes: int):
+        in_channels = model.head.classification_head.cls_logits.in_channels
+        num_anchors = model.head.classification_head.num_anchors
+        model.head = torchvision.models.detection.retinanet.RetinaNetHead(
+            in_channels=in_channels,
+            num_anchors=num_anchors,
+            num_classes=num_classes + 1,
+        )
+
+
+class DINOv2ConvNextRetinaNetDetector(AbstractDetector):
+    """RetinaNet detector with a ConvNext feature extractor backbone.
+
+    All four ConvNext stages are passed through an FPN to produce a
+    five-level (4 + max-pool) feature pyramid that feeds the RetinaNet head.
+
+    Args:
+        num_classes (int | None): Number of foreground classes.  When
+            provided the detection head is replaced to match.
+        resume (str | None): Path to a checkpoint to resume from.
+        device (str): ``"cpu"`` or a CUDA device string.
+        root_dir (str | None): Root directory used for logging.
+        finetuning (bool): If ``True`` the ConvNext backbone weights are
+            updated during training.  Defaults to ``False`` (frozen).
+    """
+
+    def __init__(
+        self,
+        num_classes: int = None,
+        resume: str = None,
+        device: str = "cpu",
+        root_dir: str = None,
+        finetuning: bool = False,
+    ):
+        self.finetuning = finetuning
+        super().__init__(
+            name="dinov2_convnext_retinanet",
+            num_classes=num_classes,
+            resume=resume,
+            device=device,
+            root_dir=root_dir,
+        )
+
+    def get_loss_names(self) -> list[str]:
+        return ["classification", "bbox_regression"]
+
+    def load_pretrained_model(self):
+        backbone = DINOv2ConvNextBackbone(out_channels=256, finetuning=self.finetuning)
+        return torchvision.models.detection.RetinaNet(
+            backbone=backbone,
+            num_classes=91,
+        )
+
+    def replace_head(self, model, num_classes: int):
+        in_channels = model.head.classification_head.cls_logits.in_channels
+        num_anchors = model.head.classification_head.num_anchors
+        model.head = torchvision.models.detection.retinanet.RetinaNetHead(
+            in_channels=in_channels,
+            num_anchors=num_anchors,
+            num_classes=num_classes + 1,
         )
