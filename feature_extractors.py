@@ -48,6 +48,8 @@ class DINOv2ViT(nn.Module):
             self.config = Dinov2Config()
             self.model = Dinov2Model(self.config)
 
+        # Only allocate LayerNorm modules when there is at least one feature
+        # level to normalise (either a captured encoder layer or patch embeddings).
         self.layer_norm = layer_norm and (len(layers) + int(output_patches)) > 0
         if self.layer_norm:
             self.norms = nn.ModuleList([
@@ -98,6 +100,12 @@ class DINOv2ViT(nn.Module):
         if not captured:
             captured[len(self.model.encoder.layer) - 1] = z.last_hidden_state
 
+        # Spatial grid dimensions derived from the input, not from patch count,
+        # so that rectangular images are handled correctly.
+        patch_size = self.config.patch_size
+        feat_h = x.shape[2] // patch_size
+        feat_w = x.shape[3] // patch_size
+
         feature_maps = OrderedDict()
         for idx, (k, feat) in enumerate(captured.items()):
             if self.layer_norm:
@@ -105,8 +113,13 @@ class DINOv2ViT(nn.Module):
             # Remove the [CLS] token
             feat = feat[:, 1:, :]
             B, P, D = feat.shape
-            h = w = int(P ** 0.5)
-            feat = feat.permute(0, 2, 1).reshape(B, D, h, w)
+            if feat_h * feat_w != P:
+                raise ValueError(
+                    f"Derived spatial grid ({feat_h}×{feat_w}={feat_h * feat_w}) does not "
+                    f"match number of patch tokens ({P}). Ensure the input image dimensions "
+                    f"are divisible by the model's patch size ({patch_size})."
+                )
+            feat = feat.permute(0, 2, 1).reshape(B, D, feat_h, feat_w)
             feature_maps[k] = feat
 
         if len(feature_maps) > 1:
