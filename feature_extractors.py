@@ -62,7 +62,9 @@ class DINOv2ViT(nn.Module):
     def _freeze(self):
         for param in self.model.parameters():
             param.requires_grad = False
-
+        if getattr(self, "layer_norm", False):
+            for param in self.norms.parameters():
+                param.requires_grad = False
     def forward(self, x: torch.Tensor):
         """Forward image through DINOv2 ViT.
 
