@@ -7,6 +7,8 @@ This module provides:
 * :class:`HungarianMatcher` – optimal bipartite matching between predicted and
   ground-truth objects using the Hungarian algorithm
   (:func:`scipy.optimize.linear_sum_assignment`).
+* :class:`DeformableDecoderNeck` – decoder-only deformable-transformer-inspired
+  neck that refines backbone features before detection.
 * :class:`HungarianDetectionHead` – transformer-decoder detection head that
   combines the matcher with a set-based training loss (classification,
   L1-box, and GIoU).
@@ -115,6 +117,162 @@ class SinusoidalPositionEncoding2D(nn.Module):
 
         pos = torch.cat([pos_y, pos_x], dim=3)  # (B, H, W, hidden_dim)
         return pos.flatten(1, 2)                 # (B, H*W, hidden_dim)
+
+
+class DeformableDecoderLayer(nn.Module):
+    """Single decoder block used by :class:`DeformableDecoderNeck`."""
+
+    def __init__(
+        self,
+        hidden_dim: int,
+        nhead: int,
+        dim_feedforward: int,
+        dropout: float,
+    ):
+        super().__init__()
+        self.self_attn = nn.MultiheadAttention(
+            embed_dim=hidden_dim,
+            num_heads=nhead,
+            dropout=dropout,
+            batch_first=True,
+        )
+        self.cross_attn = nn.MultiheadAttention(
+            embed_dim=hidden_dim,
+            num_heads=nhead,
+            dropout=dropout,
+            batch_first=True,
+        )
+        self.linear1 = nn.Linear(hidden_dim, dim_feedforward)
+        self.dropout = nn.Dropout(dropout)
+        self.linear2 = nn.Linear(dim_feedforward, hidden_dim)
+
+        self.norm1 = nn.LayerNorm(hidden_dim)
+        self.norm2 = nn.LayerNorm(hidden_dim)
+        self.norm3 = nn.LayerNorm(hidden_dim)
+        self.dropout1 = nn.Dropout(dropout)
+        self.dropout2 = nn.Dropout(dropout)
+        self.dropout3 = nn.Dropout(dropout)
+        self.activation = nn.ReLU(inplace=True)
+
+    def forward(
+        self,
+        tgt: torch.Tensor,
+        query_pos: torch.Tensor,
+        memory: torch.Tensor,
+    ) -> torch.Tensor:
+        q = k = tgt + query_pos
+        tgt2 = self.self_attn(q, k, value=tgt)[0]
+        tgt = self.norm1(tgt + self.dropout1(tgt2))
+
+        tgt2 = self.cross_attn(query=tgt + query_pos, key=memory, value=memory)[0]
+        tgt = self.norm2(tgt + self.dropout2(tgt2))
+
+        tgt2 = self.linear2(self.dropout(self.activation(self.linear1(tgt))))
+        tgt = self.norm3(tgt + self.dropout3(tgt2))
+        return tgt
+
+
+class DeformableDecoderNeck(nn.Module):
+    """Decoder-only deformable-transformer-inspired neck.
+
+    The neck creates a small multi-scale feature set from the backbone output,
+    flattens levels into a shared memory sequence, and runs a stack of decoder
+    layers over learnable object queries. No encoder stack is used.
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        hidden_dim: int = 256,
+        num_queries: int = 100,
+        nhead: int = 8,
+        num_decoder_layers: int = 6,
+        dim_feedforward: int = 2048,
+        dropout: float = 0.1,
+        num_feature_levels: int = 4,
+    ):
+        super().__init__()
+        if num_feature_levels < 1:
+            raise ValueError("num_feature_levels must be at least 1.")
+
+        self.hidden_dim = hidden_dim
+        self.num_feature_levels = num_feature_levels
+        self.input_proj = nn.Conv2d(in_channels, hidden_dim, kernel_size=1)
+        self.downsample_blocks = nn.ModuleList(
+            [
+                nn.Conv2d(hidden_dim, hidden_dim, kernel_size=3, stride=2, padding=1)
+                for _ in range(num_feature_levels - 1)
+            ]
+        )
+        self.level_embed = nn.Embedding(num_feature_levels, hidden_dim)
+        self.pos_encoding = SinusoidalPositionEncoding2D(hidden_dim)
+
+        self.query_embed = nn.Embedding(num_queries, hidden_dim)
+        self.reference_points = nn.Linear(hidden_dim, 2)
+        self.ref_point_proj = _build_mlp(hidden_dim, hidden_dim, hidden_dim, num_layers=2)
+
+        self.decoder_layers = nn.ModuleList(
+            [
+                DeformableDecoderLayer(
+                    hidden_dim=hidden_dim,
+                    nhead=nhead,
+                    dim_feedforward=dim_feedforward,
+                    dropout=dropout,
+                )
+                for _ in range(num_decoder_layers)
+            ]
+        )
+
+    def _build_memory(self, features: torch.Tensor) -> torch.Tensor:
+        feat = self.input_proj(features)
+        levels = [feat]
+        for block in self.downsample_blocks:
+            levels.append(block(levels[-1]))
+
+        memory_tokens = []
+        for level_idx, level_feat in enumerate(levels):
+            B, _, H, W = level_feat.shape
+            mask = torch.zeros(B, H, W, dtype=torch.bool, device=level_feat.device)
+            pos = self.pos_encoding(mask)
+            tokens = level_feat.flatten(2).permute(0, 2, 1)
+            level_bias = self.level_embed.weight[level_idx].view(1, 1, -1)
+            memory_tokens.append(tokens + pos + level_bias)
+        return torch.cat(memory_tokens, dim=1)
+
+    def _reference_positional_encoding(self, reference_points: torch.Tensor) -> torch.Tensor:
+        # reference_points: (B, Q, 2) in [0, 1]
+        scale = 2.0 * math.pi
+        dim_t = torch.arange(
+            self.hidden_dim // 2,
+            dtype=reference_points.dtype,
+            device=reference_points.device,
+        )
+        dim_t = 10000 ** (2 * (dim_t // 2) / max(1, self.hidden_dim // 2))
+
+        ref = reference_points[:, :, :, None] * scale
+        ref = ref / dim_t
+        pos = torch.stack((ref[..., 0::2].sin(), ref[..., 1::2].cos()), dim=-1).flatten(-2)
+        pos = pos.flatten(-2)
+        if pos.shape[-1] != self.hidden_dim:
+            pos = pos[..., : self.hidden_dim]
+        return self.ref_point_proj(pos)
+
+    def forward(self, features: torch.Tensor) -> torch.Tensor:
+        B = features.shape[0]
+        memory = self._build_memory(features)
+        query = self.query_embed.weight.unsqueeze(0).expand(B, -1, -1)
+        reference_points = self.reference_points(query).sigmoid()
+        query_pos = self._reference_positional_encoding(reference_points)
+
+        refined_queries = query
+        for layer in self.decoder_layers:
+            refined_queries = layer(
+                tgt=refined_queries,
+                query_pos=query_pos,
+                memory=memory,
+            )
+
+        return refined_queries
 
 
 # ---------------------------------------------------------------------------
@@ -234,13 +392,11 @@ class HungarianMatcher(nn.Module):
 class HungarianDetectionHead(nn.Module):
     """DETR-style detection head that uses Hungarian matching for supervision.
 
-    The head accepts a single spatial feature map from a DINOv2 backbone,
-    projects it to ``hidden_dim`` channels, adds 2-D sinusoidal positional
-    encodings, and feeds the result as the *memory* of a standard
-    :class:`torch.nn.TransformerDecoder`.  A set of ``num_queries`` learnable
-    object queries act as the *target* sequence.  The decoded queries are
-    independently passed through a classification head and a bounding-box
-    regression MLP.
+    The head accepts a single spatial feature map from a DINOv2 backbone and
+    first routes it through a decoder-only
+    :class:`~hungarian_head.DeformableDecoderNeck` (no transformer encoder).
+    The decoded query features are then passed through a classification head
+    and a bounding-box regression MLP.
 
     **Training** – ground-truth objects are assigned to predicted queries via
     the :class:`HungarianMatcher`.  Three losses are computed:
@@ -265,6 +421,8 @@ class HungarianDetectionHead(nn.Module):
             Default: 8.
         num_decoder_layers (int): Depth of the transformer decoder.
             Default: 6.
+        num_feature_levels (int): Number of memory feature levels built by the
+            deformable decoder neck.  Default: 4.
         dim_feedforward (int): Feedforward dimension inside each transformer
             layer.  Default: 2048.
         dropout (float): Dropout probability in the transformer.  Default: 0.1.
@@ -290,6 +448,7 @@ class HungarianDetectionHead(nn.Module):
         num_queries: int = 100,
         nhead: int = 8,
         num_decoder_layers: int = 6,
+        num_feature_levels: int = 4,
         dim_feedforward: int = 2048,
         dropout: float = 0.1,
         weight_class: float = 1.0,
@@ -308,26 +467,16 @@ class HungarianDetectionHead(nn.Module):
         self.loss_weight_bbox = loss_weight_bbox
         self.loss_weight_giou = loss_weight_giou
 
-        # Project backbone features to hidden_dim
-        self.input_proj = nn.Conv2d(in_channels, hidden_dim, kernel_size=1)
-
-        # Positional encoding for memory tokens
-        self.pos_encoding = SinusoidalPositionEncoding2D(hidden_dim)
-
-        # Learnable object queries
-        self.query_embed = nn.Embedding(num_queries, hidden_dim)
-
-        # Transformer decoder
-        decoder_layer = nn.TransformerDecoderLayer(
-            d_model=hidden_dim,
+        # Decoder-only deformable neck (no encoder stack)
+        self.neck = DeformableDecoderNeck(
+            in_channels=in_channels,
+            hidden_dim=hidden_dim,
+            num_queries=num_queries,
             nhead=nhead,
+            num_decoder_layers=num_decoder_layers,
+            num_feature_levels=num_feature_levels,
             dim_feedforward=dim_feedforward,
             dropout=dropout,
-            batch_first=True,
-        )
-        self.transformer_decoder = nn.TransformerDecoder(
-            decoder_layer=decoder_layer,
-            num_layers=num_decoder_layers,
         )
 
         # Prediction heads
@@ -367,19 +516,7 @@ class HungarianDetectionHead(nn.Module):
                 * **Inference** – a list of dicts each containing ``'boxes'``
                   (absolute *xyxy*), ``'labels'`` (1-indexed), and ``'scores'``.
         """
-        B, _, H, W = features.shape
-
-        # Project features and add positional encoding
-        feat = self.input_proj(features)                             # (B, D, H, W)
-        mask = torch.zeros(B, H, W, dtype=torch.bool, device=features.device)
-        pos = self.pos_encoding(mask)                                # (B, H*W, D)
-        memory = feat.flatten(2).permute(0, 2, 1) + pos             # (B, H*W, D)
-
-        # Expand learnable queries for the whole batch
-        queries = self.query_embed.weight.unsqueeze(0).expand(B, -1, -1)  # (B, Q, D)
-
-        # Decode
-        decoded = self.transformer_decoder(tgt=queries, memory=memory)     # (B, Q, D)
+        decoded = self.neck(features)                              # (B, Q, D)
 
         # Predictions
         pred_logits = self.class_head(decoded)              # (B, Q, C+1)

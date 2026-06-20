@@ -724,6 +724,8 @@ class DINOv2HungarianDetector(AbstractDetector):
             Default: 8.
         num_decoder_layers (int): Depth of the transformer decoder.
             Default: 6.
+        num_feature_levels (int): Number of multi-scale feature levels used by
+            the deformable decoder neck. Default: 4.
         score_threshold (float): Minimum foreground score to keep during
             inference.  Default: 0.5.
     """
@@ -740,6 +742,7 @@ class DINOv2HungarianDetector(AbstractDetector):
         num_queries: int = 100,
         nhead: int = 8,
         num_decoder_layers: int = 6,
+        num_feature_levels: int = 4,
         score_threshold: float = 0.5,
     ):
         # Set attributes before calling super().__init__ because
@@ -750,6 +753,7 @@ class DINOv2HungarianDetector(AbstractDetector):
         self.num_queries = num_queries
         self.nhead = nhead
         self.num_decoder_layers = num_decoder_layers
+        self.num_feature_levels = num_feature_levels
         self.score_threshold = score_threshold
         super().__init__(
             name="dinov2_hungarian",
@@ -777,6 +781,7 @@ class DINOv2HungarianDetector(AbstractDetector):
             num_queries=self.num_queries,
             nhead=self.nhead,
             num_decoder_layers=self.num_decoder_layers,
+            num_feature_levels=self.num_feature_levels,
             score_threshold=self.score_threshold,
         )
         return DINOv2HungarianDetectionModel(backbone=backbone, head=head)
@@ -790,5 +795,6 @@ class DINOv2HungarianDetector(AbstractDetector):
             num_queries=self.num_queries,
             nhead=self.nhead,
             num_decoder_layers=self.num_decoder_layers,
+            num_feature_levels=self.num_feature_levels,
             score_threshold=self.score_threshold,
         )
