@@ -15,6 +15,14 @@ There are six models and their subtypes that you can use with this library:
 
 For more details about these models see the <a href="https://pytorch.org/vision/stable/models.html#object-detection" target="_blank">official PyTorch Documentation</a>.
 
+## Additional documentation
+
+Detailed usage notes are available in the `mkdocs/` directory:
+
+- `mkdocs/dataset.md`
+- `mkdocs/training.md`
+- `mkdocs/inference.md`
+
 ## Training models
 
 First you need to import the necessary libraries:
